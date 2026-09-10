@@ -14,6 +14,15 @@
 
 ---
 
+## Feedback & Contributing
+
+Feedback, bug reports, and feature requests are very welcome!
+
+* **Bug reports & Feature suggestions**: Please open an issue on the GitHub Issues tab.
+* **Code contributions**: Feel free to fork the repository and submit a Pull Request.
+
+---
+
 ## Frame Structure
 
 Each serialized packet follows a strict frame format:
