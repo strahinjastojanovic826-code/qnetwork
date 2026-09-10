@@ -1,0 +1,10 @@
+[package]
+name = "qnetwork"
+version = "0.1.0"
+edition = "2021"
+authors = ["Strale <strahinjastojanovic826@gmail.com>"]
+description = "A quaternary (2-bit) network protocol library with FEC, stream decoding, and packet framing."
+license = "AGPLv3.0-or-later"
+repository = "https://github.com/tvoj-korisnik/qnetwork"
+
+[dependencies]
