@@ -11,7 +11,7 @@
 * **Packet Framing (`QuatPacket`)**: Structured binary packets with a `"Q4"` magic header, payload length, and checksum validation.
 * **Stream Decoder (`StreamDecoder`)**: Handles incoming network buffer streams over TCP/IP sockets, auto-detecting framing boundaries and extracting valid packets.
 * **Custom Serialization Trait (`QuatSerde`)**: Built-in implementations for data types like `u32` and string references (`&str`).
-
+ 
 ---
 
 ## Feedback & Contributing
