@@ -35,11 +35,11 @@ Add `qnetwork` to your project dependencies:
 ```toml
 [dependencies]
 qnetwork = "0.1.0"
-
 ```
 
-Serialization and Packet Building
+### 2. Serialization and Packet Building
 
+```rust
 use qnetwork::{QuatBuffer, QuatPacket, QuatSerde};
 
 fn main() -> Result<(), &'static str> {
@@ -53,20 +53,18 @@ fn main() -> Result<(), &'static str> {
 
     // Deserialize back from raw bytes
     let deserialized_packet = QuatPacket::deserialize(&raw_bytes)?;
-    
+
     // Read value back using QuatSerde
     let restored_number = u32::from_quats(&deserialized_packet.payload)?;
     assert_eq!(number, restored_number);
 
     Ok(())
 }
-
 ```
 
-Stream Parsing over TCP Sockets
+### 3. Stream Parsing over TCP Sockets
 
-Use StreamDecoder to assemble complete packets from partial TCP byte chunks:
-
+```rust
 use qnetwork::{StreamDecoder, QuatPacket};
 
 fn process_incoming_data(decoder: &mut StreamDecoder, chunk: &[u8]) {
@@ -77,11 +75,11 @@ fn process_incoming_data(decoder: &mut StreamDecoder, chunk: &[u8]) {
         println!("Received valid QuatPacket with {} quats", packet.payload.len());
     }
 }
-
 ```
 
-Error Correction via FEC (Hamming 7,4):
+### 4. Error Correction via FEC (Hamming 7,4)
 
+```rust
 use qnetwork::{Quat, QuatBuffer};
 
 fn main() {
@@ -95,6 +93,7 @@ fn main() {
     // Auto-correct single-bit flip on receiver side
     let raw_received_byte = encoded_bytes[0] ^ 0b00000010; // Corrupt 1 bit
     let corrected_nibble = QuatBuffer::decode_fec_byte(raw_received_byte);
-    
+
     println!("Successfully corrected error! Decoded nibble: {:b}", corrected_nibble);
 }
+```
