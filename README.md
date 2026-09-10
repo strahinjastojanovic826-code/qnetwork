@@ -36,6 +36,8 @@ Add `qnetwork` to your project dependencies:
 [dependencies]
 qnetwork = "0.1.0"
 
+```
+
 Serialization and Packet Building
 
 use qnetwork::{QuatBuffer, QuatPacket, QuatSerde};
@@ -59,6 +61,8 @@ fn main() -> Result<(), &'static str> {
     Ok(())
 }
 
+```
+
 Stream Parsing over TCP Sockets
 
 Use StreamDecoder to assemble complete packets from partial TCP byte chunks:
@@ -73,6 +77,8 @@ fn process_incoming_data(decoder: &mut StreamDecoder, chunk: &[u8]) {
         println!("Received valid QuatPacket with {} quats", packet.payload.len());
     }
 }
+
+```
 
 Error Correction via FEC (Hamming 7,4):
 
