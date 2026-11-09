@@ -1,6 +1,6 @@
 [package]
 name = "qnetwork"
-version = "0.5.0"
+version = "0.6.0"
 edition = "2021"
 authors = ["Strale <strahinjastojanovic826@gmail.com>"]
 description = "A quaternary (2-bit) network protocol library with FEC, stream decoding, and packet framing."

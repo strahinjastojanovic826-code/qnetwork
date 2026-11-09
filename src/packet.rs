@@ -114,3 +114,37 @@ impl QuatPacket {
         acc
     }
 }
+
+pub struct QuatPacketRef<'a> {
+    pub payload_bytes: &'a [u8],
+    pub checksum: u32,
+}
+
+impl<'a> QuatPacketRef<'a> {
+    /// Zero-copy parsing over the raw incoming network byte stream
+    pub fn parse(bytes: &'a [u8]) -> Result<Self, NetworkError> {
+        if bytes.len() < 10 {
+            return Err(NetworkError::PackageTooShort);
+        }
+        // Provera magičnog zaglavlja "Q4"
+        if &bytes[0..2] != b"Q4" {
+            return Err(NetworkError::IncorrectMagicHeader);
+        }
+
+        let payload_len_u32 = u32::from_be_bytes(bytes[2..6].try_into().unwrap()) as usize;
+        let payload_end = 6 + payload_len_u32;
+
+        if bytes.len() < payload_end + 4 {
+            return Err(NetworkError::PackageSmallerThanHeader);
+        }
+
+        // Zero-copy reference umesto alokacije novog vektora
+        let payload_bytes = &bytes[6..payload_end];
+        let checksum = u32::from_be_bytes(bytes[payload_end..payload_end + 4].try_into().unwrap());
+
+        Ok(Self {
+            payload_bytes,
+            checksum,
+        })
+    }
+}

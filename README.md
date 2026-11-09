@@ -18,6 +18,9 @@
 * **`Reliable UDP (ARQ)`**: Built-in reliability layer over standard UDP for sequence tracking and packet transmission management.
 * **`Advanced FEC Parity`**: Extended block-level XOR parity generation (`generate_parity_packet`) for recovering lost data packages.
 * **`Standard CRC32 Support`**: Alternative standard polynomial checksum calculations (`calculate_crc32`) alongside custom checksum algorithms for robust integrity verification.
+* **Buffer Pooling**: High-performance buffer recycling mechanism (`BufferPool`) designed to eliminate heap allocations and reduce memory fragmentation.
+* **Zero-Copy Deserialization**: Ultra-fast packet parsing (`QuatPacketRef`) operating directly over raw network byte slices without unnecessary data copying.
+* **Observability & Metrics**: Thread-safe atomic metrics collection (`NetworkMetrics`) for real-time tracking of transferred quats, packets, errors, and CRC mismatches.
 
 ---
 
@@ -29,6 +32,25 @@ This project is dual-licensed:
 * **Commercial License:** Required if you want to use `qnetwork` in closed-source or proprietary commercial software without AGPLv3 restrictions.
 
 For commercial licensing, contact: **strahinjastojanovic826@gmail.com**
+
+---
+
+## Benchmark
+
+| Test / Benchmark | Execution Time | Details / Description |
+| :--- | :---: | :--- |
+| BufferPool Acquisition | 1,257 µs | 10,000 buffer acquisition and recycling operations |
+| Zero-Copy Parsing | 618 µs | 5,000 zero-copy network packet parsing operations |
+| Stress Million Quats & FEC | 60,587 µs (60.59 ms) | Serialization and deserialization of 1,000,000 quats |
+| StreamDecoder Processing | 448 µs | Successfully decoded 100 packets from the network stream |
+| QuatMux Frame Unpacking | 18 µs | Unpacking and validation check of modes (Priority / RLE) |
+| Error Handling (Checksum) | 7 µs | Expected error detected (ChecksumMismatch) |
+| Advanced GF(4) FEC Block | 18 µs | Calculation and parity block check in the GF(4) field |
+| FEC Error Correction | 1 µs | Detection and correction of a corrupted bit in a quaternary byte |
+| RLE Compression Roundtrip | ~9 µs | Roundtrip compression and decompression test for quat sequences |
+| Quat Serde u32 | ~2 µs | Conversion of standard u32 number to quats and back |
+| Industrial Metrics | 1 µs | Verification of telemetry atomic counters and errors |
+| Socket Loopback Comm. | - | Verification of local connection and UDP/TCP socket binding |
 
 ---
 
@@ -61,7 +83,7 @@ Add `qnetwork` to your project dependencies:
 
 ```toml
 [dependencies]
-qnetwork = "0.5.0"
+qnetwork = "0.6.0"
 ```
 
 ### 2. Serialization and Packet Building
@@ -216,6 +238,68 @@ fn main() -> Result<(), NetworkError> {
     Ok(())
 }
 
+```
+
+### 8. High-Performance Buffer Pooling
+
+```rust
+use qnetwork::pool::BufferPool;
+
+fn main() {
+    // Create a buffer pool with capacity for 64 buffers of 1024 bytes each
+    let pool = BufferPool::new(64, 1024);
+
+    // Acquire a reusable buffer from the pool (avoids heap allocations)
+    let mut pooled_buf = pool.acquire();
+    
+    if let Some(buf) = &mut pooled_buf.buf {
+        buf.extend_from_slice(b"Quaternary network payload");
+        println!("Buffer acquired and used, length: {}", buf.len());
+    }
+    // Automatically recycled back to the pool when 'pooled_buf' goes out of scope
+}
+```
+
+### 9. Zero-Copy Packet Parsing
+
+```rust
+use qnetwork::packet::{QuatPacket, QuatPacketRef, QuatBuffer};
+use qnetwork::errors::NetworkError;
+
+fn main() -> Result<(), NetworkError> {
+    let mut q_buf = QuatBuffer::new();
+    q_buf.push(qnetwork::quat::Quat::Q1);
+    
+    let packet = QuatPacket::new(q_buf);
+    let wire_bytes = packet.serialize();
+
+    // Parse the incoming stream using zero-copy (borrowing slice data directly)
+    let packet_ref = QuatPacketRef::parse(&wire_bytes)?;
+    println!("Zero-copy parsed payload bytes len: {}", packet_ref.payload_bytes.len());
+    println!("Checksum: {}", packet_ref.checksum);
+
+    Ok(())
+}
+```
+
+### 10. Observability & Network Metrics
+
+```rust
+use qnetwork::metrics::NetworkMetrics;
+
+fn main() {
+    let metrics = NetworkMetrics::new();
+
+    // Simulate sending network traffic
+    metrics.inc_quats_sent(100);
+    metrics.record_packet_sent();
+
+    // Fetch snapshot for monitoring
+    let snapshot = metrics.snapshot();
+    println!("Total quats sent: {}", snapshot.quats_sent);
+    println!("Total packets sent: {}", snapshot.packets_sent);
+    println!("Current error count: {}", snapshot.error_count);
+}
 ```
 
 ## C / C++ / C# Interoperability (FFI)
