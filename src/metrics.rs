@@ -60,7 +60,7 @@ impl NetworkMetrics {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct MetricsSnapshot {
     pub quats_sent: u64,
     pub quats_received: u64,

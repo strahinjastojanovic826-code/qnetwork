@@ -21,6 +21,12 @@
 * **Buffer Pooling**: High-performance buffer recycling mechanism (`BufferPool`) designed to eliminate heap allocations and reduce memory fragmentation.
 * **Zero-Copy Deserialization**: Ultra-fast packet parsing (`QuatPacketRef`) operating directly over raw network byte slices without unnecessary data copying.
 * **Observability & Metrics**: Thread-safe atomic metrics collection (`NetworkMetrics`) for real-time tracking of transferred quats, packets, errors, and CRC mismatches.
+* **GF(4) Quaternary Algebra (`Gf4`)**: True Galois field arithmetic (`GF(2)[x]/(x^2 + x + 1)`) with addition, multiplication, multiplicative inverse, parity calculation, and linear combinations over 2-bit quaternary states.
+* **ARQ + FEC Reliable Transport (`ReliableArqEngine`)**: Sequence-numbered frame tracking, ACK handling, exponential backoff retransmissions, and FEC-protected payload encoding/decoding.
+* **Protocol Hardening & Bounds Checking (`parse_frame_safe`)**: Safe wire-frame validation with strict frame/quat size limits and overflow-checked length calculations without panicking on malformed input.
+* **Backpressure & Async Pool Helpers (`bounded_command_channel`, `SharedBufferPool`)**: Bounded Tokio command channels to prevent unbounded memory growth under load alongside reusable pooled buffers.
+* **Extended Telemetry & Prometheus Export (`ExtendedTelemetry`)**: Atomic tracking of retransmissions, dropped packets, buffer pool hits/misses, and RTT microseconds with Prometheus/OpenMetrics text export.
+* **Hardened C ABI (`QNetStatus`, `qnet_handle_*`)**: Panic-safe `extern "C"` handle lifecycle with explicit status codes, null/capacity checks, and C/C++/Python (`ctypes`) interoperability.
 
 ---
 
@@ -37,20 +43,32 @@ For commercial licensing, contact: **strahinjastojanovic826@gmail.com**
 
 ## Benchmark
 
-| Test / Benchmark | Execution Time | Details / Description |
-| :--- | :---: | :--- |
-| BufferPool Acquisition | 1,257 µs | 10,000 buffer acquisition and recycling operations |
-| Zero-Copy Parsing | 618 µs | 5,000 zero-copy network packet parsing operations |
-| Stress Million Quats & FEC | 60,587 µs (60.59 ms) | Serialization and deserialization of 1,000,000 quats |
-| StreamDecoder Processing | 448 µs | Successfully decoded 100 packets from the network stream |
-| QuatMux Frame Unpacking | 18 µs | Unpacking and validation check of modes (Priority / RLE) |
-| Error Handling (Checksum) | 7 µs | Expected error detected (ChecksumMismatch) |
-| Advanced GF(4) FEC Block | 18 µs | Calculation and parity block check in the GF(4) field |
-| FEC Error Correction | 1 µs | Detection and correction of a corrupted bit in a quaternary byte |
-| RLE Compression Roundtrip | ~9 µs | Roundtrip compression and decompression test for quat sequences |
-| Quat Serde u32 | ~2 µs | Conversion of standard u32 number to quats and back |
-| Industrial Metrics | 1 µs | Verification of telemetry atomic counters and errors |
-| Socket Loopback Comm. | - | Verification of local connection and UDP/TCP socket binding |
+| Test / Benchmark Name | Status | Time (us) | Scale / Notes |
+| :--- | :---: | :---: | :--- |
+| `test_fec_error_correction`[cite: 41] | `ok`[cite: 41] | `2`[cite: 41] | Single-bit FEC error correction[cite: 24, 41] |
+| `test_rle_compression_roundtrip`[cite: 41] | `ok`[cite: 42] | `5`[cite: 41] | RLE compression & decompression roundtrip[cite: 25, 41] |
+| `test_quat_serde_u32`[cite: 41] | `ok`[cite: 42] | `9`[cite: 41] | `u32` quaternary serialization & deserialization[cite: 24, 41] |
+| `test_stream_decoder`[cite: 41] | `ok`[cite: 42] | `10`[cite: 41] | Stream framing & packet reconstruction[cite: 24, 41] |
+| `Advanced GF(4) FEC Block Check` (`test_fec_gf4`)[cite: 41, 42] | `ok`[cite: 42] | `15`[cite: 41] | GF(4) FEC block encode & error check[cite: 28, 41] |
+| `test_observability_prometheus_export`[cite: 41] | `ok`[cite: 42] | `19`[cite: 41] | Extended telemetry & Prometheus text export[cite: 41] |
+| `Industrial Metrics & Observability` (`test_metrics`)[cite: 41, 42] | `ok`[cite: 42] | `0`[cite: 41] | Atomic counters & snapshot read (< 1 us)[cite: 28, 29, 41] |
+| `test_gf4_arithmetic_and_parity`[cite: 41] | `ok`[cite: 42] | `361`[cite: 41] | GF(4) field arithmetic, inverse & block parity[cite: 41] |
+| `Zero-Copy Parsing` (`test_zero_copy`)[cite: 41, 42] | `ok`[cite: 42] | `570`[cite: 41] | `5k ops` zero-copy frame parsing[cite: 28, 41] |
+| `test_hardening_frame_bounds`[cite: 41] | `ok`[cite: 42] | `744`[cite: 41] | `10k ops` safe bounds & overflow validation[cite: 41] |
+| `BufferPool Acquisition` (`test_buffer_pool`)[cite: 41, 42] | `ok`[cite: 42] | `1349`[cite: 41] | `10k ops` pooled buffer acquisition[cite: 28, 41] |
+| `test_c_abi_handle_lifecycle`[cite: 41] | `ok`[cite: 42] | `1367`[cite: 41] | `1k ops` C ABI handle create/push/pack/unpack/free[cite: 41] |
+| `test_async_backpressure_and_pool`[cite: 41] | `ok`[cite: 42] | `1423`[cite: 41] | Bounded async channel backpressure & pool[cite: 41] |
+| `test_arq_fec_retransmission`[cite: 41] | `ok`[cite: 42] | `2288`[cite: 41] | ARQ sequence tracking, FEC & retransmission[cite: 41] |
+| `test_stress_million_quats_fec_and_packet`[cite: 42] | `ok`[cite: 42] | `59218` (`59.22 ms`)[cite: 42] | `1,000,000` quats serialization & deserialization stress test[cite: 25, 42] |
+| `test_socket_loopback_communication`[cite: 42] | `ok`[cite: 42] | — | Socket loopback test[cite: 27, 42] |
+
+### Integration Suite Report (`run_full_qnetwork_suite_with_report`)
+
+| Integration Test Name | Status | Time (us) | Details |
+| :--- | :---: | :---: | :--- |
+| `StreamDecoder Processing (100 Packets)`[cite: 41, 42] | `PASSED`[cite: 41, 42] | `486`[cite: 41, 42] | Decoded 100/100 packets successfully[cite: 41, 42] |
+| `QuatMux Frame Unpacking & Mode Check`[cite: 41, 42] | `PASSED`[cite: 41, 42] | `9`[cite: 41, 42] | Result matches expected Priority/Rle mode: `true`[cite: 41, 42] |
+| `Error Handling (Corrupted Checksum)`[cite: 41, 42] | `PASSED`[cite: 41, 42] | `0`[cite: 41, 42] | Caught expected error: `Some(ChecksumMismatch)`[cite: 41, 42] |
 
 ---
 
@@ -83,7 +101,7 @@ Add `qnetwork` to your project dependencies:
 
 ```toml
 [dependencies]
-qnetwork = "0.6.0"
+qnetwork = "0.7.0"
 ```
 
 ### 2. Serialization and Packet Building
@@ -302,6 +320,87 @@ fn main() {
 }
 ```
 
+### 11. GF(4) Quaternary Algebra
+```rust
+use qnetwork::gf4::{encode_gf4_block, gf4_parity, Gf4};
+use qnetwork::quat::{Quat, QuatBuffer};
+
+fn main() {
+    let prod = Gf4::new(Quat::Q2).mul(Gf4::new(Quat::Q3));
+    assert_eq!(prod, Gf4::new(Quat::Q1));
+
+    let mut buf = QuatBuffer::new();
+    buf.push(Quat::Q1);
+    buf.push(Quat::Q2);
+
+    let parity = gf4_parity(&buf.quats);
+    let encoded = encode_gf4_block(&buf);
+    println!("GF(4) parity: {:?}, encoded len: {}", parity, encoded.quats.len());
+}
+```
+
+### 12. ARQ + FEC Reliable Transport
+```rust
+use qnetwork::errors::NetworkError;
+use qnetwork::quat::{Quat, QuatBuffer};
+use std::time::Duration;
+
+fn main() -> Result<(), NetworkError> {
+    let mut engine = qnetwork::arq::ReliableArqEngine::new(4, Duration::from_millis(200), 3);
+    let mut payload = QuatBuffer::new();
+    payload.push(Quat::Q0);
+    payload.push(Quat::Q3);
+
+    let frame = engine.prepare_send(&payload);
+    let (seq, unpacked) = engine.receive_frame(&frame)?;
+    assert!(engine.on_ack(seq));
+    println!("ACKed seq {} with {} quats", seq, unpacked.quats.len());
+    Ok(())
+}
+```
+
+### 13. Hardened Frame Parsing & Async Backpressure
+```rust
+use qnetwork::async_ext::{bounded_command_channel, send_command_backpressured, SharedBufferPool};
+use qnetwork::errors::NetworkError;
+use qnetwork::hardening::parse_frame_safe;
+use qnetwork::manager::ConnectionCommand;
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+
+#[tokio::main]
+async fn main() -> Result<(), NetworkError> {
+    let bad = b"Q4\x00\x00\x00\x01\x00";
+    assert!(parse_frame_safe(bad).is_err());
+
+    let (tx, mut rx) = bounded_command_channel(8);
+    let _pool = SharedBufferPool::new(16, 512);
+    let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 8080);
+
+    send_command_backpressured(&tx, ConnectionCommand::Unregister { addr }).await?;
+    let _ = rx.recv().await;
+    Ok(())
+}
+```
+
+### 14. Extended Telemetry & Prometheus Export
+```rust
+use qnetwork::metrics::NetworkMetrics;
+use qnetwork::observability::ExtendedTelemetry;
+
+fn main() {
+    let metrics = NetworkMetrics::new();
+    metrics.inc_quats_sent(64);
+    metrics.record_packet_sent();
+
+    let telemetry = ExtendedTelemetry::new();
+    telemetry.record_pool_hit();
+    telemetry.record_rtt_micros(150);
+
+    let prom = telemetry.to_prometheus("qnetwork", metrics.snapshot());
+    println!("{}", prom);
+}
+```
+
 ## C / C++ / C# Interoperability (FFI)
 
 `qnetwork` can be compiled into a native C-compatible dynamic library (`.dll` on Windows, `.so` on Linux, `.dylib` on macOS), enabling seamless usage from C, C++, and C#.
@@ -354,6 +453,89 @@ int main() {
     return 0;
 }
 ```
+
+---
+
+### C extended C ABI
+
+```c
+#include <stdint.h>
+#include <stddef.h>
+#include <stdio.h>
+
+typedef enum {
+    QNET_STATUS_OK = 0,
+    QNET_STATUS_NULL_POINTER = -1,
+    QNET_STATUS_INVALID_QUAT = -2,
+    QNET_STATUS_BUFFER_TOO_SMALL = -3,
+    QNET_STATUS_INVALID_STREAM = -4,
+    QNET_STATUS_LENGTH_OVERFLOW = -5,
+    QNET_STATUS_INTERNAL_PANIC = -99
+} QNetStatus;
+
+typedef struct QNetQuatHandle QNetQuatHandle;
+
+QNetQuatHandle* qnet_handle_new(void);
+void qnet_handle_free(QNetQuatHandle* handle);
+QNetStatus qnet_handle_push_quat(QNetQuatHandle* handle, uint8_t val);
+QNetStatus qnet_handle_pack(
+    const QNetQuatHandle* handle,
+    uint8_t* out_buf,
+    size_t out_capacity,
+    size_t* out_written
+);
+QNetStatus qnet_handle_unpack(
+    QNetQuatHandle* handle,
+    const uint8_t* packed_ptr,
+    size_t packed_len,
+    size_t total_quats
+);
+
+int main(void) {
+    QNetQuatHandle* handle = qnet_handle_new();
+    if (!handle) {
+        fprintf(stderr, "Failed to allocate QNetQuatHandle\n");
+        return 1;
+    }
+
+    if (qnet_handle_push_quat(handle, 0) != QNET_STATUS_OK ||
+        qnet_handle_push_quat(handle, 1) != QNET_STATUS_OK ||
+        qnet_handle_push_quat(handle, 2) != QNET_STATUS_OK ||
+        qnet_handle_push_quat(handle, 3) != QNET_STATUS_OK) {
+        fprintf(stderr, "Failed to push quaternary values\n");
+        qnet_handle_free(handle);
+        return 1;
+    }
+
+    /* Invalid quat check (must be 0..=3) */
+    if (qnet_handle_push_quat(handle, 9) == QNET_STATUS_INVALID_QUAT) {
+        printf("Rejected invalid quat value as expected\n");
+    }
+
+    uint8_t packed[8] = {0};
+    size_t written = 0;
+    QNetStatus st = qnet_handle_pack(handle, packed, sizeof(packed), &written);
+    if (st != QNET_STATUS_OK) {
+        fprintf(stderr, "Pack failed with status %d\n", (int)st);
+        qnet_handle_free(handle);
+        return 1;
+    }
+    printf("Packed 4 quats into %zu byte(s)\n", written);
+
+    st = qnet_handle_unpack(handle, packed, written, 4);
+    if (st != QNET_STATUS_OK) {
+        fprintf(stderr, "Unpack failed with status %d\n", (int)st);
+        qnet_handle_free(handle);
+        return 1;
+    }
+    printf("Unpacked %zu byte(s) back into 4 quats\n", written);
+
+    qnet_handle_free(handle);
+    return 0;
+}
+```
+
+---
 
 **Compilation Command:**
 ```bash

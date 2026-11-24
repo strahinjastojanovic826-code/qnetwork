@@ -11,6 +11,11 @@ pub mod pool;
 pub mod manager;
 pub mod fec;
 pub mod metrics;
+pub mod gf4;
+pub mod arq;
+pub mod hardening;
+pub mod async_ext;
+pub mod observability;
 
 // Re-exportovanje radi lakšeg korišćenja van biblioteke
 pub use quat::{Quat, QuatBuffer};
@@ -334,6 +339,194 @@ fn test_metrics_benchmark() {
     assert_eq!(snapshot.packets_sent, 1);
     assert_eq!(snapshot.crc_mismatches, 1);
     println!("[BENCHMARK] Industrial Metrics & Observability: {} us", duration);
+}
+
+#[test]
+fn test_gf4_arithmetic_and_parity_benchmark() {
+    use crate::gf4::{encode_gf4_block, gf4_parity, Gf4};
+    use crate::quat::{Quat, QuatBuffer};
+    use std::time::Instant;
+
+    let start = Instant::now();
+
+    // In GF(4) = GF(2)[x]/(x^2 + x + 1): Q2 (x) * Q3 (x + 1) = x^2 + x = 1 (Q1)
+    let prod = Gf4::new(Quat::Q2).mul(Gf4::new(Quat::Q3));
+    assert_eq!(prod, Gf4::new(Quat::Q1));
+    assert_eq!(Gf4::new(Quat::Q2).inv(), Some(Gf4::new(Quat::Q3)));
+
+    let mut buf = QuatBuffer::new();
+    for _ in 0..1024 {
+        buf.push(Quat::Q0);
+        buf.push(Quat::Q1);
+        buf.push(Quat::Q2);
+        buf.push(Quat::Q3);
+    }
+
+    let parity = gf4_parity(&buf.quats);
+    assert_eq!(parity, Quat::Q0);
+
+    let encoded = encode_gf4_block(&buf);
+    assert_eq!(encoded.quats.len(), buf.quats.len() + 1);
+
+    let duration = start.elapsed().as_micros();
+    println!("[BENCHMARK] test_gf4_arithmetic_and_parity took {} us", duration);
+}
+
+#[test]
+fn test_arq_fec_retransmission_benchmark() {
+    use crate::arq::ReliableArqEngine;
+    use crate::quat::{Quat, QuatBuffer};
+    use std::thread::sleep;
+    use std::time::{Duration, Instant};
+
+    let start = Instant::now();
+
+    let mut engine = ReliableArqEngine::new(4, Duration::from_millis(1), 3);
+    let mut payload = QuatBuffer::new();
+    payload.push(Quat::Q3);
+    payload.push(Quat::Q2);
+    payload.push(Quat::Q1);
+    payload.push(Quat::Q0);
+
+    let frame = engine.prepare_send(&payload);
+    assert_eq!(frame.seq, 0);
+    assert_eq!(engine.pending_count(), 1);
+
+    let (rx_seq, unpacked) = engine.receive_frame(&frame).expect("Frame receive should succeed");
+    assert_eq!(rx_seq, 0);
+    assert_eq!(unpacked.quats, payload.quats);
+
+    sleep(Duration::from_millis(2));
+    let retries = engine.collect_retransmissions().expect("Retries should succeed");
+    assert_eq!(retries.len(), 1);
+    assert_eq!(retries[0].seq, 0);
+
+    assert!(engine.on_ack(0));
+    assert_eq!(engine.pending_count(), 0);
+
+    let duration = start.elapsed().as_micros();
+    println!("[BENCHMARK] test_arq_fec_retransmission took {} us", duration);
+}
+
+#[test]
+fn test_hardening_frame_bounds_benchmark() {
+    use crate::hardening::{parse_frame_safe, MAX_SAFE_QUAT_COUNT};
+    use std::time::Instant;
+
+    let start = Instant::now();
+
+    let mut oversized_header = Vec::with_capacity(16);
+    oversized_header.extend_from_slice(b"Q4");
+    oversized_header.extend_from_slice(&(MAX_SAFE_QUAT_COUNT as u32 + 1).to_be_bytes());
+    oversized_header.extend_from_slice(&[0u8; 8]);
+
+    for _ in 0..10_000 {
+        let res = parse_frame_safe(&oversized_header);
+        assert!(res.is_err());
+    }
+
+    let duration = start.elapsed().as_micros();
+    println!("[BENCHMARK] test_hardening_frame_bounds (10k ops) took {} us", duration);
+}
+
+#[test]
+fn test_async_backpressure_and_pool_benchmark() {
+    use crate::async_ext::{bounded_command_channel, send_command_backpressured, SharedBufferPool};
+    use crate::manager::ConnectionCommand;
+    use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+    use std::time::Instant;
+    use tokio::runtime::Runtime;
+
+    let start = Instant::now();
+    let rt = Runtime::new().expect("Tokio runtime should initialize");
+
+    rt.block_on(async {
+        let (tx, mut rx) = bounded_command_channel(4);
+        let pool = SharedBufferPool::new(16, 256);
+        let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 9000);
+
+        for _ in 0..4 {
+            let _buf = pool.acquire();
+            let cmd = ConnectionCommand::Unregister { addr };
+            send_command_backpressured(&tx, cmd)
+                .await
+                .expect("Send within capacity should succeed");
+        }
+
+        assert!(tx.try_send(ConnectionCommand::Unregister { addr }).is_err());
+        let _ = rx.recv().await;
+    });
+
+    let duration = start.elapsed().as_micros();
+    println!("[BENCHMARK] test_async_backpressure_and_pool took {} us", duration);
+}
+
+#[test]
+fn test_observability_prometheus_export_benchmark() {
+    use crate::metrics::NetworkMetrics;
+    use crate::observability::ExtendedTelemetry;
+    use std::time::Instant;
+
+    let start = Instant::now();
+
+    let metrics = NetworkMetrics::new();
+    metrics.inc_quats_sent(256);
+    metrics.record_packet_sent();
+
+    let telemetry = ExtendedTelemetry::new();
+    telemetry.record_retransmission();
+    telemetry.record_pool_hit();
+    telemetry.record_rtt_micros(120);
+    telemetry.record_rtt_micros(240);
+
+    let prom = telemetry.to_prometheus("qnetwork", metrics.snapshot());
+    assert!(prom.contains("qnetwork_rtt_avg_microseconds 180"));
+    assert!(prom.contains("qnetwork_retransmissions_total 1"));
+
+    let duration = start.elapsed().as_micros();
+    println!("[BENCHMARK] test_observability_prometheus_export took {} us", duration);
+}
+
+#[test]
+fn test_c_abi_handle_lifecycle_benchmark() {
+    use crate::ffi::{
+        qnet_handle_free, qnet_handle_new, qnet_handle_pack, qnet_handle_push_quat,
+        qnet_handle_unpack, QNetStatus,
+    };
+    use std::time::Instant;
+
+    let start = Instant::now();
+
+    for _ in 0..1_000 {
+        unsafe {
+            let handle = qnet_handle_new();
+            assert!(!handle.is_null());
+
+            assert_eq!(qnet_handle_push_quat(handle, 0), QNetStatus::Ok);
+            assert_eq!(qnet_handle_push_quat(handle, 1), QNetStatus::Ok);
+            assert_eq!(qnet_handle_push_quat(handle, 2), QNetStatus::Ok);
+            assert_eq!(qnet_handle_push_quat(handle, 3), QNetStatus::Ok);
+            assert_eq!(qnet_handle_push_quat(handle, 9), QNetStatus::InvalidQuat);
+
+            let mut out = [0u8; 4];
+            let mut written: usize = 0;
+            assert_eq!(
+                qnet_handle_pack(handle, out.as_mut_ptr(), out.len(), &mut written),
+                QNetStatus::Ok
+            );
+            assert_eq!(written, 1);
+
+            assert_eq!(
+                qnet_handle_unpack(handle, out.as_ptr(), written, 4),
+                QNetStatus::Ok
+            );
+
+            qnet_handle_free(handle);
+        }
+    }
+
+    let duration = start.elapsed().as_micros();
+    println!("[BENCHMARK] test_c_abi_handle_lifecycle (1k ops) took {} us", duration);
 }
 
 }
